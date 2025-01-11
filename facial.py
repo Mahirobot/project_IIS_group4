@@ -4,21 +4,13 @@
 # Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
 
 
-import pandas as pd
+
 import os
 import cv2
 import pickle
 from feat import Detector
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor
-from PIL import Image
+
+
 
 def capture_and_process_image(cap, face_tracker, detector):
     """
@@ -56,7 +48,7 @@ def capture_and_process_image(cap, face_tracker, detector):
         with open('model.pkl', 'rb') as f:
             model = pickle.load(f)
         emotion = model.predict([face_features])[0]  # Model expects 2D array
-        print(emotion)
+        confidence = model.predict_proba([face_features]).max()
             # Display the predicted emotion
         cv2.putText(frame, f'Emotion: {emotion}', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
@@ -64,7 +56,7 @@ def capture_and_process_image(cap, face_tracker, detector):
         if os.path.exists(temp_image_path):
             os.remove(temp_image_path)
 
-        return result
+        return {'emotion':emotion, 'confidence':confidence}
     except Exception as e:
         print(f"Error during detection: {e}")
         # Clean up the temporary file in case of error

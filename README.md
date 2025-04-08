@@ -1,4 +1,4 @@
-# project_IIS_group4
+# Alex the Bartender
 Setup: 
 1. Create a conda environment with the latest python version.
 2. Use the requirements.txt and spec-file.txt to install necessary dependencies.

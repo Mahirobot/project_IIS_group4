@@ -1,36 +1,20 @@
-# This is a sample Python script.
-
-# Press Ctrl+F5 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
-
-
-import pandas as pd
 import os
 import cv2
 import pickle
+import threading
+from queue import Queue
 from feat import Detector
+import time
+import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor
-from PIL import Image
+from concurrent.futures import ThreadPoolExecutor
 
-def capture_and_process_image(cap, face_tracker, detector):
+def process_snapshot(temp_image_path, frame, face_tracker, detector, model_valence, model_arousal, model_emotion, result_queue, stop_event):
     """
-    Captures an image from the webcam, saves it temporarily, and processes it using the detector.
+    Processes a snapshot to prevent blocking the webcam feed.
     """
-
-    # Read a frame from the webcam
-    ret, frame = cap.read()
-    if not ret:
-        print("Failed to capture frame.")
-        return None
-
+    if stop_event.is_set():
+        return
     # Convert to grayscale for face detection
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -38,56 +22,62 @@ def capture_and_process_image(cap, face_tracker, detector):
     faces = face_tracker.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
     if len(faces) == 0:
         print("No face detected.")
-        return None
+        result_queue.put(None)  # Indicate no result
+        return
 
-    # Process the first detected face (modify if you want to process multiple faces)
+    # Process the first detected face
     x, y, w, h = faces[0]
     face_roi = frame[y:y + h, x:x + w]
 
     # Save the face ROI as a temporary image
-    temp_image_path = "temp_face.jpg"
     cv2.imwrite(temp_image_path, face_roi)
 
     try:
         # Pass the image path to the detector
         result = detector.detect_image(temp_image_path)
-        # Predict the emotion using the Random Forest model
         face_features = result.aus.values.flatten()
-        with open('model.pkl', 'rb') as f:
-            model = pickle.load(f)
-        emotion = model.predict([face_features])[0]  # Model expects 2D array
-        print(emotion)
-            # Display the predicted emotion
-        cv2.putText(frame, f'Emotion: {emotion}', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+      
+        # Predict the emotion using the preloaded model
+        valence = model_valence.predict([face_features])[0]
+   
+        arousal = model_arousal.predict([face_features])[0]
+        face_features_with_valence_arousal = np.append(face_features, [valence, arousal])
+       
+     
+        emotion = model_emotion.predict([face_features_with_valence_arousal])[0]
+        confidence = model_emotion.predict_proba([face_features_with_valence_arousal]).max()
 
-        # Delete the temporary image
-        if os.path.exists(temp_image_path):
-            os.remove(temp_image_path)
-
-        return result
+        print(f"Emotion: {emotion}, Confidence: {confidence:.2f}")
+        # Return the result via the queue
+        result_queue.put({'emotion': emotion, 'confidence': confidence})
     except Exception as e:
         print(f"Error during detection: {e}")
-        # Clean up the temporary file in case of error
-        if os.path.exists(temp_image_path):
-            os.remove(temp_image_path)
-        return None
+        result_queue.put(None)  # Indicate no result
+    #finally:
+        # Clean up the temporary file
+        # if os.path.exists(temp_image_path):
+        #     os.remove(temp_image_path)
 
-
-def open_webcam():
-    face_tracker = cv2.CascadeClassifier("frontal_face_features.xml")
-    detector = Detector()
-    # Open the laptop webcam (default device is 0)
+def open_webcam(result_queue, temp_image_path, face_tracker, detector, model_valence, model_arousal, model_emotion, interval=15, stop_event=None):
+    """
+    Opens the webcam and captures frames every specified interval in a background thread.
+    """
+    # Open the laptop webcam
     cap = cv2.VideoCapture(0)
 
     # Check if the webcam is opened correctly
     if not cap.isOpened():
         print("Error: Could not access the webcam.")
-        exit()
+        return
 
-    print("Press 'Enter' to capture and process an image.")
-    print("Press 'ESC' to exit.")
+    print("Webcam is running in the background. Press Ctrl+C to stop.")
 
-    while True:
+    last_capture_time = 0  # To track the interval
+
+    # Create the ThreadPoolExecutor outside of the 'with' block
+    executor = ThreadPoolExecutor(max_workers=2)  # Limit to 2 concurrent threads
+
+    while not stop_event.is_set():  # Check the stop event for termination
         # Capture frame-by-frame
         ret, frame = cap.read()
 
@@ -99,18 +89,61 @@ def open_webcam():
         # Display the live feed
         cv2.imshow("Live Feed", frame)
 
-        # Check for key presses
-        key = cv2.waitKey(1) & 0xFF
-        if key == 27:  # Press 'ESC' to exit the program
+        # Capture and process image every interval seconds
+        current_time = time.time()
+        if current_time - last_capture_time >= interval:
+            # Submit the snapshot processing task to the thread pool
+            executor.submit(process_snapshot, temp_image_path, frame.copy(), face_tracker, detector,model_valence, model_arousal, model_emotion, result_queue, stop_event)
+            last_capture_time = current_time
+
+        # Close the live feed window if 'ESC' is pressed
+        if cv2.waitKey(1) & 0xFF == 27:
             break
-        elif key == 13:  # Press 'Enter' to capture and process an image
-            detection_result = capture_and_process_image(cap, face_tracker, detector)
 
     # Release the capture and close the OpenCV window
     cap.release()
     cv2.destroyAllWindows()
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    open_webcam()
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    # Shutdown the executor when done
+    executor.shutdown()
+
+if __name__ == '__main__':
+    # Initialize resources
+    result_queue = Queue()
+    temp_image_path = "temp_face.jpg"
+    face_tracker = cv2.CascadeClassifier("frontal_face_features.xml")
+    detector = Detector()
+
+    # Load the models
+    with open('model_valence.pkl', 'rb') as f:
+        model_valence = pickle.load(f)
+    with open('model_arousal.pkl', 'rb') as f:
+        model_arousal = pickle.load(f)
+    with open('model_emotion.pkl', 'rb') as f:
+        model_emotion = pickle.load(f)
+
+    # Stop event to gracefully terminate the webcam thread
+    stop_event = threading.Event()
+
+    # Run open_webcam in a background thread
+    webcam_thread = threading.Thread(
+        target=open_webcam,
+        args=(result_queue, temp_image_path, face_tracker, detector,model_valence, model_arousal, model_emotion, 5, stop_event)
+    )
+    webcam_thread.start()
+
+    try:
+        while True:
+            # Retrieve results from the queue in the main thread
+            if not result_queue.empty():
+                result = result_queue.get()
+                if result is not None:
+                    print(f"Detected Emotion: {result['emotion']}, Confidence: {result['confidence']:.2f}")
+                else:
+                    print("No result received.")
+            time.sleep(1)  # Simulate other main thread tasks
+    except KeyboardInterrupt:
+        print("Stopping the webcam thread...")
+        stop_event.set()  # Signal the webcam thread to stop
+        webcam_thread.join()  # Wait for the thread to finish
+        print("Webcam thread stopped.")

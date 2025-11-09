@@ -1,12 +1,12 @@
-🧉 Alex the Bartender
+# 🧉 Alex the Bartender
 
 Alex the Bartender is an interactive AI bartender that uses facial emotion recognition and speech interaction to engage with users. The system integrates a facial emotion recognition model and communicates with the Furhat robot (or its virtual environment) to deliver personalized, expressive conversations.
 
-🚀 Demo
+## 🚀 Demo
 
 🎥 Watch the Demo: Click here to view on Google Drive
 
-🧠 Project Overview
+## 🧠 Project Overview
 
 This project consists of two main parts:
 

@@ -4,7 +4,7 @@ Alex the Bartender is an interactive AI bartender that uses facial emotion recog
 
 ## 🚀 Demo
 
-🎥 Watch the Demo: Click here to view on Google Drive
+🎥 Watch the Demo: (Click here to view on Google Drive)[https://drive.google.com/file/d/1la5QHN8unJsavEjprDaI4MAakuZemPZ6/view?usp=drive_link]
 
 ## 🧠 Project Overview
 
